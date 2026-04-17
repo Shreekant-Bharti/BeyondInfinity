@@ -1,0 +1,316 @@
+#define BLYNK_TEMPLATE_ID "TMPL3L61Q43NV"
+#define BLYNK_TEMPLATE_NAME "automation"
+#define BLYNK_AUTH_TOKEN "vS3152tcqEXTh_CmhnST4qJ1C5Ltrrwa"
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+
+char ssid[] = "Test1234";
+char pass[] = "12345678";
+
+// ==========================
+// 📲 SMS CONFIG
+// ==========================
+const char* API_KEY = "cd_shr_170426_yy2zsH";
+const char* PHONE = "919508059974";
+
+// ==========================
+// 🔌 PINS
+// ==========================
+#define TRIG D1
+#define ECHO D2
+#define RELAY D5
+#define BULB_ON  D6
+#define BULB_OFF D7
+#define BUZZER D8
+
+#define TANK_HEIGHT 15.0
+
+bool motorState = false;
+bool autoMode = 1;
+
+// 🔥 Fault system
+bool fault = false;
+int lastLevel = -1;
+unsigned long lastChangeTime = 0;
+unsigned long faultTime = 0;
+
+BlynkTimer timer;
+
+// ==========================
+// 📩 SEND SMS
+// ==========================
+void sendSMS() {
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected");
+    return;
+  }
+
+  WiFiClient client;
+  HTTPClient http;
+
+  http.begin(client, "https://api.circuitdigest.cloud/sms/send");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", String("Bearer ") + API_KEY);
+
+  String message =
+    "DRY RUN ALERT (T-01)\n"
+    "Water level not increasing.\n"
+    "Motor auto OFF.\n"
+    "Check pump or pipeline.";
+
+  String payload = "{";
+  payload += "\"to\":\"" + String(PHONE) + "\",";
+  payload += "\"message\":\"" + message + "\"";
+  payload += "}";
+
+  Serial.println("Sending SMS...");
+  Serial.println(payload);
+
+  int httpCode = http.POST(payload);
+
+  Serial.print("HTTP Code: ");
+  Serial.println(httpCode);
+
+  String response = http.getString();
+  Serial.println("Response: " + response);
+
+  http.end();
+}
+
+// ==========================
+// 📏 DISTANCE
+// ==========================
+float getDistance() {
+  float sum = 0;
+  int valid = 0;
+
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(TRIG, LOW);
+    delayMicroseconds(2);
+
+    digitalWrite(TRIG, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG, LOW);
+
+    long duration = pulseIn(ECHO, HIGH, 30000);
+    float d = duration * 0.034 / 2;
+
+    if (d > 0 && d < 20) {
+      sum += d;
+      valid++;
+    }
+
+    delay(10);
+  }
+
+  if (valid == 0) return 999;
+  return sum / valid;
+}
+
+// ==========================
+// 📊 LEVEL
+// ==========================
+int getLevelPercent(float distance) {
+
+  if (distance <= 0 || distance > 20) return -1;
+
+  float waterHeight = TANK_HEIGHT - distance;
+  if (waterHeight < 0) waterHeight = 0;
+
+  float rawPercent = (waterHeight / TANK_HEIGHT) * 100;
+  float scaledPercent = (rawPercent / 82.0) * 100;
+
+  if (scaledPercent > 100) scaledPercent = 100;
+  if (scaledPercent < 0) scaledPercent = 0;
+
+  return (int)scaledPercent;
+}
+
+// ==========================
+// 🚨 FAULT DETECTION (FINAL)
+// ==========================
+void checkFault(int level) {
+
+  // 🚫 Motor OFF → reset tracking
+  if (!motorState) {
+    lastLevel = -1;
+    return;
+  }
+
+  // 🚫 Already fault
+  if (fault) return;
+
+  // 🟢 Start tracking when motor turns ON
+  if (lastLevel == -1) {
+    lastLevel = level;
+    lastChangeTime = millis();
+    Serial.println("Tracking started (Motor ON)");
+    return;
+  }
+
+  // ✅ Level increased → reset timer
+  if (level > lastLevel) {
+    lastLevel = level;
+    lastChangeTime = millis();
+    Serial.println("Level rising → OK");
+    return;
+  }
+
+  // ⚠️ No increase → check 25 sec
+  if (millis() - lastChangeTime > 25000) {
+
+    fault = true;
+    motorState = 0;
+
+    Blynk.virtualWrite(V4, 1);
+
+    digitalWrite(BUZZER, HIGH);
+    faultTime = millis();
+
+    Serial.println("FAULT DETECTED (Dry Run)");
+
+    sendSMS();
+  }
+}
+
+// ==========================
+// 🚀 MAIN LOOP LOGIC
+// ==========================
+void sendData() {
+
+  float distance = getDistance();
+  int levelPercent = getLevelPercent(distance);
+
+  if (levelPercent == -1) return;
+
+  bool isFull95 = (levelPercent >= 95);
+  bool isLow25 = (levelPercent <= 25);
+
+  checkFault(levelPercent);
+
+  if (!fault) {
+
+    if (autoMode) {
+
+      if (isFull95) motorState = 0;
+      else if (isLow25) motorState = 1;
+
+    } else {
+
+      if (levelPercent >= 95) {
+        motorState = 0;
+        autoMode = 1;
+        Blynk.virtualWrite(V2, 1);
+      }
+    }
+  }
+
+  // 🔔 Buzzer OFF after 5 sec
+  if (fault && millis() - faultTime > 5000) {
+    digitalWrite(BUZZER, LOW);
+  }
+
+  digitalWrite(RELAY, motorState ? LOW : HIGH);
+  digitalWrite(BULB_ON, motorState ? HIGH : LOW);
+  digitalWrite(BULB_OFF, motorState ? LOW : HIGH);
+
+  if (Blynk.connected()) {
+    Blynk.virtualWrite(V0, levelPercent);
+    Blynk.virtualWrite(V1, motorState);
+    Blynk.virtualWrite(V3, motorState);
+  }
+
+  Serial.print("Level: ");
+  Serial.print(levelPercent);
+  Serial.print("% | Motor: ");
+  Serial.print(motorState ? "ON" : "OFF");
+  Serial.print(" | Fault: ");
+  Serial.println(fault ? "YES" : "NO");
+}
+
+// ==========================
+// 🎛️ BLYNK CONTROLS
+// ==========================
+BLYNK_WRITE(V2) {
+  autoMode = param.asInt();
+}
+
+BLYNK_WRITE(V3) {
+  if (!autoMode && !fault) {
+    motorState = param.asInt();
+  }
+}
+
+// 🔥 RESET BUTTON (V4)
+BLYNK_WRITE(V4) {
+  int val = param.asInt();
+
+  if (val == 0) {
+
+    fault = false;
+    autoMode = 1;
+    motorState = 1;
+
+    lastLevel = -1;
+
+    digitalWrite(BUZZER, LOW);
+
+    Blynk.virtualWrite(V2, 1);
+    Blynk.virtualWrite(V3, 1);
+
+    Serial.println("SYSTEM RESET");
+  }
+}
+
+BLYNK_CONNECTED() {
+  Blynk.syncVirtual(V2);
+  Blynk.syncVirtual(V3);
+  Blynk.syncVirtual(V4);
+}
+
+// ==========================
+// 🔧 SETUP
+// ==========================
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  pinMode(RELAY, OUTPUT);
+  pinMode(BULB_ON, OUTPUT);
+  pinMode(BULB_OFF, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+
+  digitalWrite(RELAY, HIGH);
+  digitalWrite(BULB_ON, LOW);
+  digitalWrite(BULB_OFF, HIGH);
+  digitalWrite(BUZZER, LOW);
+
+  Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, pass);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected!");
+
+  Blynk.config(BLYNK_AUTH_TOKEN);
+
+  timer.setInterval(2000L, sendData);
+}
+
+// ==========================
+// 🔁 LOOP
+// ==========================
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.run();
+  }
+  timer.run();
+}
