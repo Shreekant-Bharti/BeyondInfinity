@@ -1,0 +1,21 @@
+{
+    "name": "water-tank-automation",
+    "version": "1.0.0",
+    "description": "BIT Sindri — Smart Campus Water Management System",
+    "author": "BIT Sindri IoT Lab",
+    "license": "MIT",
+    "scripts": {
+        "start": "nodemon server.js",
+        "dev": "node server.js",
+        "install-deps": "npm install"
+    },
+    "dependencies": {
+        "bcryptjs": "^3.0.3",
+        "cors": "^2.8.6",
+        "dotenv": "^17.4.2",
+        "express": "^5.2.1",
+        "mongoose": "^9.4.1",
+        "multer": "^2.1.1",
+        "nodemon": "^3.1.14"
+    }
+}
