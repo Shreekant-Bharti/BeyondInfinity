@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MongoDB Data Viewer — BIT Sindri Water Tank</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d2e;
+      --surface2:  #232740;
+      --border:    #2e3250;
+      --accent:    #4f8ef7;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --orange:    #f97316;
+      --text:      #e2e8f0;
+      --muted:     #8892a4;
+      --radius:    12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #1a1d2e 0%, #0f1117 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #4f8ef7, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header p { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 6px 14px;
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; } 50% { opacity:0.4; }
+    }
+
+    /* ── Main Layout ── */
+    main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Stats bar ── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      transition: border-color .2s;
+    }
+    .stat-card:hover { border-color: var(--accent); }
+    .stat-card .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .stat-card .value { font-size: 1.6rem; font-weight: 700; margin-top: 6px; }
+    .stat-card .value.blue  { color: var(--accent); }
+    .stat-card .value.green { color: var(--green); }
+    .stat-card .value.orange{ color: var(--orange); }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    select, input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: border-color .2s;
+    }
+    select:focus, input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+    }
+    button:hover { opacity: 0.85; }
+    button:active { transform: scale(0.97); }
+    button.secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .auto-badge {
+      font-size: 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      color: var(--muted);
+    }
+    #countdown { color: var(--accent); font-weight: 600; }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .table-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-header h2 { font-size: 0.95rem; font-weight: 600; }
+    .record-count {
+      font-size: 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 10px;
+      color: var(--muted);
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: var(--surface2); }
+    th {
+      text-align: left;
+      padding: 11px 16px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+    tbody tr {
+      border-top: 1px solid var(--border);
+      transition: background .15s;
+    }
+    tbody tr:hover { background: var(--surface2); }
+    td {
+      padding: 12px 16px;
+      font-size: 0.83rem;
+    }
+    td.mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .badge-on    { background: rgba(34,197,94,.15);  color: var(--green); }
+    .badge-off   { background: rgba(239,68,68,.12);  color: var(--red);   }
+    .badge-auto  { background: rgba(79,142,247,.15); color: var(--accent);}
+    .badge-manual{ background: rgba(249,115,22,.15); color: var(--orange);}
+    .badge-hw    { background: rgba(79,142,247,.1);  color: var(--accent);}
+    .badge-sim   { background: rgba(139,146,164,.1); color: var(--muted); }
+
+    /* ── Level bar ── */
+    .level-bar-wrap { display: flex; align-items: center; gap: 10px; }
+    .level-bar {
+      flex: 1;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 60px;
+    }
+    .level-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width .5s ease;
+    }
+    .level-text { font-weight: 600; min-width: 36px; font-size: 0.83rem; }
+
+    /* ── Empty / loading ── */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .empty-state p { font-size: 0.9rem; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 0.83rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .3s, transform .3s;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Responsive ── */
+    @media (max-width: 700px) {
+      main { padding: 16px; }
+      header { padding: 14px 16px; }
+      th:nth-child(5), td:nth-child(5),
+      th:nth-child(6), td:nth-child(6) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🗄️ MongoDB Data Viewer</h1>
+    <p>BIT Sindri — Smart Water Tank Monitoring System</p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <div class="status-pill">
+      <span class="status-dot" id="dbDot"></span>
+      <span id="dbStatus">Connecting…</span>
+    </div>
+    <a href="/" style="text-decoration:none;">
+      <button class="secondary">← Dashboard</button>
+    </a>
+  </div>
+</header>
+
+<main>
+  <!-- Stats bar -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="label">Total Records in DB</div>
+      <div class="value blue" id="statTotal">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Tanks with Data</div>
+      <div class="value green" id="statTanks">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Last Record Time</div>
+      <div class="value orange" id="statLast" style="font-size:1rem;margin-top:10px;">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">DB Limit per Tank</div>
+      <div class="value blue">10</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <select id="tankFilter">
+      <option value="">All Tanks</option>
+      <option value="T-01">T-01 — Main OHT</option>
+      <option value="T-02">T-02 — Hostel A</option>
+      <option value="T-03">T-03 — Admin Block</option>
+      <option value="T-04">T-04 — Hostel B</option>
+      <option value="T-05">T-05 — Library</option>
+      <option value="T-06">T-06 — Workshop</option>
+    </select>
+    <button onclick="fetchData()">🔄 Refresh</button>
+    <div class="auto-badge">Auto-refresh in <span id="countdown">10</span>s</div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <h2>Sensor History Records — MongoDB Atlas</h2>
+      <span class="record-count" id="recordCount">Loading…</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Tank ID</th>
+          <th>Level</th>
+          <th>Pump</th>
+          <th>Mode</th>
+          <th>Source</th>
+          <th>Saved At</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="7">
+          <div class="empty-state">
+            <div class="icon">⏳</div>
+            <p>Loading data from MongoDB…</p>
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  let countdown = 10;
+  let timer;
+
+  function levelColor(lvl) {
+    if (lvl < 20) return '#ef4444';
+    if (lvl < 50) return '#f97316';
+    if (lvl < 80) return '#4f8ef7';
+    return '#22c55e';
+  }
+
+  function formatTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: true
+    });
+  }
+
+  function showToast(msg, ok = true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.borderColor = ok ? 'var(--green)' : 'var(--red)';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  async function fetchData() {
+    const id = document.getElementById('tankFilter').value;
+    const url = id ? `/api/db/history?id=${id}` : '/api/db/history';
+
+    try {
+      const res  = await fetch(url);
+      const json = await res.json();
+
+      // DB status indicator
+      const dot    = document.getElementById('dbDot');
+      const status = document.getElementById('dbStatus');
+      if (json.success) {
+        dot.style.background    = 'var(--green)';
+        dot.style.boxShadow     = '0 0 8px var(--green)';
+        status.textContent      = 'MongoDB Connected';
+      }
+
+      const records = json.data || [];
+      renderTable(records);
+      updateStats(records);
+      document.getElementById('recordCount').textContent = `${records.length} record(s)`;
+      showToast(`✅ ${records.length} records loaded`);
+
+    } catch (err) {
+      document.getElementById('dbDot').style.background = 'var(--red)';
+      document.getElementById('dbStatus').textContent   = 'DB Offline';
+      document.getElementById('recordCount').textContent = 'Error';
+      document.getElementById('tableBody').innerHTML = `
+        <tr><td colspan="7">
+          <div class="empty-state">
+            <div class="icon">❌</div>
+            <p>Could not reach backend. Make sure <code>node server.js</code> is running.</p>
+          </div>
+        </td></tr>`;
+      showToast('❌ Backend unreachable', false);
+    }
+  }
+
+  function updateStats(records) {
+    document.getElementById('statTotal').textContent = records.length;
+    const tanks = new Set(records.map(r => r.tankId)).size;
+    document.getElementById('statTanks').textContent = tanks;
+    if (records.length > 0) {
+      const latest = records.reduce((a, b) =>
+        new Date(a.savedAt) > new Date(b.savedAt) ? a : b);
+      document.getElementById('statLast').textContent = formatTime(latest.savedAt);
+    }
+  }
+
+  function renderTable(records) {
+    const tbody = document.getElementById('tableBody');
+    if (!records.length) {
+      tbody.innerHTML = `
+        <tr><td colspan="7">
+          <div class="empty-state">
+            <div class="icon">📭</div>
+            <p>No records found. Send some sensor data via <strong>POST /api/tank</strong> first.</p>
+          </div>
+        </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = records.map((r, i) => {
+      const lvl   = Math.round(r.level);
+      const color = levelColor(lvl);
+
+      const pumpBadge = r.pumpStatus === 'ON'
+        ? '<span class="badge badge-on">🟢 ON</span>'
+        : '<span class="badge badge-off">🔴 OFF</span>';
+
+      const modeBadge = r.mode === 'AUTO'
+        ? '<span class="badge badge-auto">AUTO</span>'
+        : '<span class="badge badge-manual">MANUAL</span>';
+
+      const srcBadge = r.source === 'HARDWARE'
+        ? '<span class="badge badge-hw">⚡ HW</span>'
+        : '<span class="badge badge-sim">SIM</span>';
+
+      return `
+        <tr>
+          <td class="mono">${i + 1}</td>
+          <td><strong>${r.tankId || '—'}</strong><br>
+            <span style="font-size:.72rem;color:var(--muted)">${r.tankName || ''}</span>
+          </td>
+          <td>
+            <div class="level-bar-wrap">
+              <div class="level-bar">
+                <div class="level-fill" style="width:${lvl}%;background:${color}"></div>
+              </div>
+              <span class="level-text" style="color:${color}">${lvl}%</span>
+            </div>
+          </td>
+          <td>${pumpBadge}</td>
+          <td>${modeBadge}</td>
+          <td>${srcBadge}</td>
+          <td class="mono">${formatTime(r.savedAt)}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  // Auto-refresh countdown
+  function startCountdown() {
+    clearInterval(timer);
+    countdown = 10;
+    document.getElementById('countdown').textContent = countdown;
+    timer = setInterval(() => {
+      countdown--;
+      document.getElementById('countdown').textContent = countdown;
+      if (countdown <= 0) {
+        fetchData();
+        countdown = 10;
+      }
+    }, 1000);
+  }
+
+  document.getElementById('tankFilter').addEventListener('change', () => {
+    fetchData();
+    startCountdown();
+  });
+
+  // Initial load
+  fetchData();
+  startCountdown();
+</script>
+</body>
+</html>
